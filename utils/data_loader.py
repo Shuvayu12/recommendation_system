@@ -29,9 +29,11 @@ def load_movielens_data(data_path: str, min_rating: float) -> Dict:
     os.makedirs(data_path, exist_ok=True)
     
     # Check if data exists in Kaggle's default location first
-    kaggle_path = "/kaggle/input/movielens-100k-dataset/ml-100k/u.data"
-    if os.path.exists(kaggle_path):
-        data_file = kaggle_path
+    data_file = "/kaggle/input/movielens-100k-dataset/ml-100k/u.data"
+    
+    if not os.path.exists(data_file):
+        # Fallback to manual download
+        url = "http://files.grouplens.org/datasets/movielens/ml-100k.zip"
     elif not os.path.exists(f"{data_path}/u.data"):
         # Download if not present
         download_movielens(data_path)
