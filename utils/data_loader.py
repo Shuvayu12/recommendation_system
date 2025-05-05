@@ -1,20 +1,47 @@
 import os
 import pandas as pd
 import torch
+import requests
+import zipfile
 from typing import Dict, List, Tuple
 
+def download_movielens(data_path: str):
+    """Download and extract MovieLens data using Python-native methods"""
+    ml_url = "http://files.grouplens.org/datasets/movielens/ml-100k.zip"
+    zip_path = os.path.join(data_path, "ml-100k.zip")
+    
+    # Download the zip file
+    response = requests.get(ml_url, stream=True)
+    with open(zip_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=128):
+            f.write(chunk)
+    
+    # Extract the zip file
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(data_path)
+    
+    # Remove the zip file
+    os.remove(zip_path)
+
 def load_movielens_data(data_path: str, min_rating: float) -> Dict:
-    """Load MovieLens data directly in Kaggle (no local download needed)."""
-    # Kaggle paths (MovieLens 100k is pre-available)
-    if not os.path.exists(f"{data_path}/u.data"):
-        # Download if not present (e.g., in Kaggle)
-        os.makedirs(data_path, exist_ok=True)
-        !wget http://files.grouplens.org/datasets/movielens/ml-100k.zip -O ml-100k.zip
-        !unzip ml-100k.zip -d {data_path}/
+    """Load MovieLens data with automatic download if needed"""
+    # Create directory if it doesn't exist
+    os.makedirs(data_path, exist_ok=True)
+    
+    # Check if data exists in Kaggle's default location first
+    kaggle_path = "/kaggle/input/movielens-100k-dataset/ml-100k/u.data"
+    if os.path.exists(kaggle_path):
+        data_file = kaggle_path
+    elif not os.path.exists(f"{data_path}/u.data"):
+        # Download if not present
+        download_movielens(data_path)
+        data_file = f"{data_path}/u.data"
+    else:
+        data_file = f"{data_path}/u.data"
     
     # Load data (standard MovieLens 100k format)
     ratings = pd.read_csv(
-        f"{data_path}/u.data", 
+        data_file,
         sep="\t", 
         names=["user_id", "item_id", "rating", "timestamp"]
     )
