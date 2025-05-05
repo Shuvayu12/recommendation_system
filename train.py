@@ -8,15 +8,18 @@ from models.hybrid import HybridRecommender
 from utils.data_loader import load_movielens_data
 from utils.metrics import calculate_metrics
 from config import config
+import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, TensorDataset
+from datetime import datetime
+import numpy as np
+from tqdm import tqdm
 
 def train_recommender():
-    """Main training function for the hybrid recommender system."""
-    # Load and preprocess data
-    print("Loading MovieLens data...")
+    # Load data
     data = load_movielens_data(config.data_path, config.min_rating)
     
-    # Initialize recommender
-    print("Initializing recommender system...")
+    # Initialize recommender with device awareness
     recommender = HybridRecommender(config)
     recommender.initialize(
         user_ids=data['user_ids'],
@@ -24,31 +27,27 @@ def train_recommender():
         item_content_features=data['item_features']
     )
     
-    # Prepare training data
-    train_interactions = data['train_interactions']
-    test_interactions = data['test_interactions']
-    
-    # Convert to internal indices
-    train_interactions_internal = [
+    # Convert interactions to device
+    train_interactions = [
         (recommender.user_map[u], recommender.item_map[i], r)
-        for u, i, r in train_interactions
+        for u, i, r in data['train_interactions']
+        if u in recommender.user_map and i in recommender.item_map
     ]
     
-    # Initial graph update
+    # Initial graph update with validation
     print("Building initial graph...")
-    recommender.update_graph(train_interactions)
+    recommender.update_graph(data['train_interactions'])
     
-    # Training setup
-    optimizer = torch.optim.Adam(
-        recommender.model.parameters(),
-        lr=config.learning_rate,
-        weight_decay=config.weight_decay
-    )
+    # Debug checks
+    print(f"\nDevice Check:")
+    print(f"- Model: {next(recommender.model.parameters()).device}")
+    print(f"- Graph edges: {recommender.graph['edge_index'].device}")
+    print(f"- Content features: {recommender.item_content_features.device}")
     
-    # Create DataLoader
-    user_indices = torch.tensor([u for u, _, _ in train_interactions_internal])
-    item_indices = torch.tensor([i for _, i, _ in train_interactions_internal])
-    ratings = torch.tensor([r for _, _, r in train_interactions_internal])
+    # Prepare training data
+    user_indices = torch.tensor([u for u, _, _ in train_interactions], dtype=torch.long)
+    item_indices = torch.tensor([i for _, i, _ in train_interactions], dtype=torch.long)
+    ratings = torch.tensor([r for _, _, r in train_interactions], dtype=torch.float)
     
     dataset = TensorDataset(user_indices, item_indices, ratings)
     train_loader = DataLoader(
@@ -58,16 +57,22 @@ def train_recommender():
         num_workers=config.num_workers
     )
     
-    # Training loop
-    print("Starting training...")
-    best_loss = float('inf')
-    patience_counter = 0
+    # Training setup
+    optimizer = torch.optim.Adam(
+        recommender.model.parameters(),
+        lr=config.learning_rate,
+        weight_decay=config.weight_decay
+    )
     
+    best_loss = float('inf')
+    patience = 0
+    
+    print("\nStarting training...")
     for epoch in range(config.epochs):
         recommender.model.train()
         epoch_loss = 0.0
         
-        for batch in train_loader:
+        for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}"):
             optimizer.zero_grad()
             
             user_idx, item_idx, true_ratings = batch
@@ -75,91 +80,36 @@ def train_recommender():
             item_idx = item_idx.to(config.device)
             true_ratings = true_ratings.to(config.device)
             
-            # Get content features for batch items
+            # Forward pass with debug checks
             content_features = recommender.item_content_features[item_idx]
             
-            # Forward pass
-            pred_ratings = recommender.model(
+            pred = recommender.model(
                 user_idx, item_idx, content_features,
                 recommender.graph['edge_index'],
                 recommender.graph['edge_weight']
             )
             
-            # Calculate loss
-            loss = F.mse_loss(pred_ratings, true_ratings)
-            
-            # Backward pass
+            loss = F.mse_loss(pred, true_ratings)
             loss.backward()
             optimizer.step()
             
             epoch_loss += loss.item()
         
-        # Average epoch loss
+        # Epoch processing
         epoch_loss /= len(train_loader)
-        print(f"Epoch {epoch+1}/{config.epochs}, Loss: {epoch_loss:.4f}")
+        print(f"Epoch {epoch+1} Loss: {epoch_loss:.4f}")
         
-        # Early stopping check
+        # Early stopping
         if epoch_loss < best_loss:
             best_loss = epoch_loss
-            patience_counter = 0
+            patience = 0
+            torch.save(recommender.model.state_dict(), "best_model.pt")
         else:
-            patience_counter += 1
-            if patience_counter >= config.early_stopping_patience:
-                print(f"Early stopping at epoch {epoch+1}")
+            patience += 1
+            if patience >= config.early_stopping_patience:
+                print("Early stopping triggered")
                 break
     
-    # Evaluation
-    print("Evaluating on test set...")
-    test_results = evaluate_recommender(recommender, test_interactions)
-    print("\nTest Results:")
-    for metric, value in test_results.items():
-        print(f"{metric}: {value:.4f}")
-    
+    # Load best model
+    recommender.model.load_state_dict(torch.load("best_model.pt"))
     return recommender
-
-def evaluate_recommender(recommender: HybridRecommender,
-                       test_interactions: List[Tuple[int, int, float]],
-                       k: int = 10) -> Dict[str, float]:
-    """
-    Evaluate the recommender system on test interactions.
-    
-    Args:
-        recommender: The recommender system instance
-        test_interactions: List of (user_id, item_id, rating) tuples
-        k: Number of recommendations to consider for metrics
-        
-    Returns:
-        Dictionary of metric names to values
-    """
-    # Convert to internal indices and filter unknown users/items
-    test_data = []
-    for u, i, r in test_interactions:
-        if u in recommender.user_map and i in recommender.item_map:
-            test_data.append((
-                recommender.user_map[u],
-                recommender.item_map[i],
-                r
-            ))
-    
-    if not test_data:
-        raise ValueError("No valid test interactions after filtering")
-    
-    # Generate recommendations and calculate metrics
-    all_user_recs = {}
-    for user_idx, _, _ in test_data:
-        user_id = recommender.reverse_user_map[user_idx]
-        try:
-            recs = recommender.recommend(user_id, k=k)
-            all_user_recs[user_idx] = [recommender.item_map[i] for i, _ in recs]
-        except ValueError:
-            continue
-    
-    # Calculate metrics
-    return calculate_metrics(test_data, all_user_recs, k)
-
-if __name__ == "__main__":
-    recommender = train_recommender()
-    
-    # Save the trained recommender
-    torch.save(recommender, "trained_recommender.pt")
-    print("Training complete. Model saved to 'trained_recommender.pt'")
