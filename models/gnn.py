@@ -10,16 +10,30 @@ class HybridGNN(nn.Module):
         super().__init__()
         self.config = config
         
-        # Embeddings
+        # User and item embeddings (collaborative)
         self.user_emb = nn.Embedding(num_users, config.embedding_dim)
         self.item_emb = nn.Embedding(num_items, config.embedding_dim)
+        
+        # Content feature projection
         self.content_proj = nn.Linear(content_feat_dim, config.embedding_dim)
         
-        # GNN Layers with improved initialization
-        self.conv1 = GATConv(config.embedding_dim * 2, config.embedding_dim, heads=2, dropout=config.dropout)
-        self.conv2 = GATConv(config.embedding_dim * 2, config.embedding_dim, heads=1, dropout=config.dropout)
+        # GNN layers - simplified initialization
+        self.conv1 = GATConv(
+            in_channels=config.embedding_dim * 2,
+            out_channels=config.embedding_dim,
+            heads=2,
+            dropout=config.dropout,
+            add_self_loops=False  # We'll handle this manually
+        )
+        self.conv2 = GATConv(
+            in_channels=config.embedding_dim * 2,  # *2 because of heads
+            out_channels=config.embedding_dim,
+            heads=1,
+            dropout=config.dropout,
+            add_self_loops=False
+        )
         
-        # Prediction head
+        # Prediction layers
         self.predict = nn.Sequential(
             nn.Linear(config.embedding_dim * 3, config.embedding_dim),
             nn.ReLU(),
@@ -27,18 +41,37 @@ class HybridGNN(nn.Module):
             nn.Linear(config.embedding_dim, 1)
         )
         
-        self._init_weights()
+        # Initialize weights properly
+        self.reset_parameters()
         self.num_users = num_users
         self.num_items = num_items
     
-    def _init_weights(self):
-        for module in [self.user_emb, self.item_emb, self.content_proj]:
-            nn.init.xavier_normal_(module.weight)
-        for layer in [self.conv1, self.conv2]:
-            nn.init.xavier_uniform_(layer.lin_src.weight)
-            nn.init.xavier_uniform_(layer.lin_dst.weight)
-            if hasattr(layer, 'bias') and layer.bias is not None:
-                nn.init.constant_(layer.bias, 0)
+    def reset_parameters(self):
+        """Proper weight initialization that works with GATConv"""
+        # Initialize embeddings
+        nn.init.xavier_normal_(self.user_emb.weight)
+        nn.init.xavier_normal_(self.item_emb.weight)
+        nn.init.xavier_normal_(self.content_proj.weight)
+        
+        # Initialize GAT layers after they're fully constructed
+        if hasattr(self.conv1, 'lin_src'):
+            nn.init.xavier_uniform_(self.conv1.lin_src.weight)
+            nn.init.xavier_uniform_(self.conv1.lin_dst.weight)
+            if self.conv1.bias is not None:
+                nn.init.constant_(self.conv1.bias, 0)
+        
+        if hasattr(self.conv2, 'lin_src'):
+            nn.init.xavier_uniform_(self.conv2.lin_src.weight)
+            nn.init.xavier_uniform_(self.conv2.lin_dst.weight)
+            if self.conv2.bias is not None:
+                nn.init.constant_(self.conv2.bias, 0)
+        
+        # Initialize prediction head
+        for layer in self.predict:
+            if hasattr(layer, 'weight'):
+                nn.init.xavier_normal_(layer.weight)
+                if hasattr(layer, 'bias') and layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
     
     def forward(self, user_ids, item_ids, content_features, edge_index, edge_weight=None):
         # Device consistency check
@@ -55,7 +88,7 @@ class HybridGNN(nn.Module):
         item_emb = torch.cat([i_emb, c_emb], dim=1)
         
         # Create full graph initial embeddings
-        x = torch.zeros((self.num_users + self.num_items, 2 * self.config.embedding_dim), 
+        x = torch.zeros((self.num_users + self.num_items, 2 * self.config.embedding_dim),
                       device=self.config.device)
         x[user_ids] = torch.cat([u_emb, torch.zeros_like(c_emb)], dim=1)
         x[self.num_users + item_ids] = item_emb
