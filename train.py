@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 import numpy as np
 from datetime import datetime
 

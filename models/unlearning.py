@@ -3,6 +3,9 @@ from typing import Dict, Optional
 from datetime import datetime
 import os
 
+from config import Config
+from models.hybrid import HybridRecommender
+
 class UnlearningManager:
     """
     Manages the unlearning process with snapshot and graph rewiring strategies.

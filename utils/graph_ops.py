@@ -1,5 +1,5 @@
 import torch
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 def build_graph_from_interactions(interactions: List[Tuple[int, int, float]],
                                 num_users: int,

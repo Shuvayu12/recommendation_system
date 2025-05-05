@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from config import Config
 from torch_geometric.nn import GATConv
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
 class HybridGNN(nn.Module):
     """

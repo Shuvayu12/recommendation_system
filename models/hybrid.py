@@ -1,10 +1,10 @@
 import torch
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional
 from collections import defaultdict
 import numpy as np
 from datetime import datetime
 import os
-
+from config import Config
 from .gnn import HybridGNN
 from utils.graph_ops import build_graph_from_interactions
 from utils.snapshot_manager import SnapshotManager
