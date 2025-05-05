@@ -1,0 +1,12 @@
+# Data
+data/
+*.pt
+*.pth
+
+# Python
+__pycache__/
+*.py[cod]
+
+# IDE
+.vscode/
+.DS_Store
