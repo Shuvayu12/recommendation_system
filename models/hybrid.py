@@ -8,6 +8,7 @@ from config import Config
 from .gnn import HybridGNN
 from utils.graph_ops import build_graph_from_interactions
 from utils.snapshot_manager import SnapshotManager
+import torch.nn.functional as F
 
 class HybridRecommender:
     """
