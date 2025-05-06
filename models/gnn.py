@@ -17,20 +17,22 @@ class HybridGNN(nn.Module):
         # Content feature projection
         self.content_proj = nn.Linear(content_feat_dim, config.embedding_dim)
         
-        # GNN layers with proper initialization
+        # GNN layers - let PyG handle initialization
         self.conv1 = GATConv(
             in_channels=config.embedding_dim * 2,
             out_channels=config.embedding_dim,
             heads=2,
             dropout=config.dropout,
-            add_self_loops=False
+            add_self_loops=False,
+            bias=True  # Explicitly enable bias
         )
         self.conv2 = GATConv(
-            in_channels=config.embedding_dim * 2,  # Multiply by heads
+            in_channels=config.embedding_dim * 2,  # heads=2 multiplies dims
             out_channels=config.embedding_dim,
             heads=1,
             dropout=config.dropout,
-            add_self_loops=False
+            add_self_loops=False,
+            bias=True
         )
         
         # Prediction head
@@ -41,28 +43,22 @@ class HybridGNN(nn.Module):
             nn.Linear(config.embedding_dim, 1)
         )
         
-        # Initialize weights
+        # Initialize only components WE control
         self._init_weights()
         self.num_users = num_users
         self.num_items = num_items
     
     def _init_weights(self):
-        """Safe weight initialization for all components"""
-        # Initialize embeddings
+        """Initialize only embeddings and prediction head"""
         nn.init.xavier_normal_(self.user_emb.weight)
         nn.init.xavier_normal_(self.item_emb.weight)
         nn.init.xavier_normal_(self.content_proj.weight)
         
-        # Initialize GAT layers using reset_parameters
-        self.conv1.reset_parameters()
-        self.conv2.reset_parameters()
-        
-        # Initialize prediction head
         for layer in self.predict:
             if isinstance(layer, nn.Linear):
                 nn.init.xavier_normal_(layer.weight)
                 if layer.bias is not None:
-                    nn.init.constant_(layer.bias, 0)
+                    nn.init.zeros_(layer.bias)
     
     def forward(self, user_ids, item_ids, content_features, edge_index, edge_weight=None):
         # Device consistency
